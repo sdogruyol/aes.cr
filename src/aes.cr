@@ -1,31 +1,14 @@
 require "openssl/lib_crypto"
-
-@[Link("openssl")]
+ 
 lib LibCrypto
   EVP_MAX_BLOCK_LENGTH = 32
-
+ 
   type EvpMd = Void*
   type EvpCipher = Void*
   type Engine = Void*
-
-  struct EvpCipherCtx
-    cipher : EvpCipher*
-    engine : Engine*
-    encrypt : Int32
-    buf_len : Int32
-    oiv : UInt8[EVP_MAX_IV_LENGTH]
-    iv : UInt8[EVP_MAX_IV_LENGTH]
-    buf : UInt8[EVP_MAX_BLOCK_LENGTH]
-    num : Int32
-    app_data : Void*
-    key_len : Int32
-    flags : Int64
-    cipher_data : Void*
-    final_used : Int32
-    block_mask : Int32
-    final : UInt8[EVP_MAX_BLOCK_LENGTH]
-  end
-
+ 
+  alias EvpCipherCtx = Void
+ 
   fun evp_decrypt_final_ex = EVP_DecryptFinal_ex(ctx : EvpCipherCtx*, outm : UInt8*, outl : LibC::Int*) : LibC::Int
   fun evp_decrypt_update = EVP_DecryptUpdate(ctx : EvpCipherCtx*, out : UInt8*, outl : LibC::Int*, in : UInt8*, inl : LibC::Int) : LibC::Int
   fun evp_encrypt_final_ex = EVP_EncryptFinal_ex(ctx : EvpCipherCtx*, out : UInt8*, outl : LibC::Int*) : LibC::Int
@@ -35,63 +18,68 @@ lib LibCrypto
   fun evp_aes_128_cbc = EVP_aes_128_cbc : EvpCipher
   fun evp_aes_192_cbc = EVP_aes_192_cbc : EvpCipher
   fun evp_aes_256_cbc = EVP_aes_256_cbc : EvpCipher
+  fun evp_cipher_ctx_new = EVP_CIPHER_CTX_new : EvpCipherCtx*
+  fun evp_cipher_ctx_free = EVP_CIPHER_CTX_free(ctx : EvpCipherCtx*)
   fun evp_cipher_ctx_init = EVP_CIPHER_CTX_reset(c : EvpCipherCtx*) : LibC::Int
   fun get_error = ERR_get_error : LibC::ULong
   fun get_error_string = ERR_error_string(code : LibC::ULong, buf : Pointer(LibC::Char)) : Pointer(Char)
 end
-
+ 
 class AES
-  getter encrypt_context : LibCrypto::EvpCipherCtx = LibCrypto::EvpCipherCtx.new
-  getter decrypt_context : LibCrypto::EvpCipherCtx = LibCrypto::EvpCipherCtx.new
+  getter encrypt_context : LibCrypto::EvpCipherCtx* = LibCrypto.evp_cipher_ctx_new
+  getter decrypt_context : LibCrypto::EvpCipherCtx* = LibCrypto.evp_cipher_ctx_new
   getter bits : Int32 = 256
   getter key : Slice(UInt8)
   getter iv : Slice(UInt8)
   property nonce_size : Int32 = 2
-
+ 
   SUPPORTED_BITSIZES = [128, 192, 256]
   READABLE_CHARS     = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ~!@#$%^&*()_+=-?/>.<,;:]}[{|".chars
   CHARS              = (0_u8..255_u8).to_a
-
+ 
+  def finalize
+    LibCrypto.evp_cipher_ctx_free(encrypt_context)
+    LibCrypto.evp_cipher_ctx_free(decrypt_context)
+  end
+  
   def self.generate_key(length = 32)
     key = ""
     length.times { key += CHARS.sample(Random::Secure).chr }
     key
   end
-
+ 
   def self.generate_key_readable(length = 32)
     key = ""
     length.times { key += READABLE_CHARS.sample(Random::Secure) }
     key
   end
-
+ 
   def initialize
     initialize(AES.generate_key_readable(32), AES.generate_key_readable(32), 256)
   end
-
+ 
   def initialize(bits : Int32 = 256)
     keysize = bits == 256 ? 32 : 16
     initialize(AES.generate_key_readable(keysize), AES.generate_key_readable(keysize), bits)
   end
-
+ 
   def initialize(key : String, iv : String, bits : Int32 = 256)
     initialize(key.to_slice, iv.to_slice, bits)
   end
-
+ 
   def initialize(key : Slice(UInt8), iv : Slice(UInt8), bits : Int32 = 256)
-    en = pointerof(@encrypt_context)
-    de = pointerof(@decrypt_context)
-    LibCrypto.evp_cipher_ctx_init(en)
-    LibCrypto.evp_cipher_ctx_init(de)
+    LibCrypto.evp_cipher_ctx_init(@encrypt_context)
+    LibCrypto.evp_cipher_ctx_init(@decrypt_context)
     case bits
     when 128
-      LibCrypto.evp_encrypt_init_ex(en, LibCrypto.evp_aes_128_cbc, nil, key, iv)
-      LibCrypto.evp_decrypt_init_ex(de, LibCrypto.evp_aes_128_cbc, nil, key, iv)
+      LibCrypto.evp_encrypt_init_ex(@encrypt_context, LibCrypto.evp_aes_128_cbc, nil, key, iv)
+      LibCrypto.evp_decrypt_init_ex(@decrypt_context, LibCrypto.evp_aes_128_cbc, nil, key, iv)
     when 192
-      LibCrypto.evp_encrypt_init_ex(en, LibCrypto.evp_aes_192_cbc, nil, key, iv)
-      LibCrypto.evp_decrypt_init_ex(de, LibCrypto.evp_aes_192_cbc, nil, key, iv)
+      LibCrypto.evp_encrypt_init_ex(@encrypt_context, LibCrypto.evp_aes_192_cbc, nil, key, iv)
+      LibCrypto.evp_decrypt_init_ex(@decrypt_context, LibCrypto.evp_aes_192_cbc, nil, key, iv)
     when 256
-      LibCrypto.evp_encrypt_init_ex(en, LibCrypto.evp_aes_256_cbc, nil, key, iv)
-      LibCrypto.evp_decrypt_init_ex(de, LibCrypto.evp_aes_256_cbc, nil, key, iv)
+      LibCrypto.evp_encrypt_init_ex(@encrypt_context, LibCrypto.evp_aes_256_cbc, nil, key, iv)
+      LibCrypto.evp_decrypt_init_ex(@decrypt_context, LibCrypto.evp_aes_256_cbc, nil, key, iv)
     else
       raise "bits must be one of #{SUPPORTED_BITSIZES}"
     end
@@ -99,7 +87,7 @@ class AES
     @key = key
     @iv = iv
   end
-
+ 
   def encrypt(data : Slice(UInt8))
     tmp = Slice.new(data.size + nonce_size, 0u8)
     data.copy_to(tmp)
@@ -108,53 +96,53 @@ class AES
     c_len = data.size + LibCrypto::EVP_MAX_BLOCK_LENGTH
     f_len = 0
     ciphertext = Slice.new(c_len, 0u8)
-    if LibCrypto.evp_encrypt_init_ex(pointerof(@encrypt_context), nil, nil, nil, nil) != 1
+    if LibCrypto.evp_encrypt_init_ex(@encrypt_context, nil, nil, nil, nil) != 1
       raise_ssl_error("evp_encrypt_init")
     end
-    if LibCrypto.evp_encrypt_update(pointerof(@encrypt_context), ciphertext.to_unsafe, pointerof(c_len), data, data.size) != 1
+    if LibCrypto.evp_encrypt_update(@encrypt_context, ciphertext.to_unsafe, pointerof(c_len), data, data.size) != 1
       raise_ssl_error("evp_encrypt_update")
     end
-    if LibCrypto.evp_encrypt_final_ex(pointerof(@encrypt_context), ciphertext.to_unsafe + c_len, pointerof(f_len)) != 1
+    if LibCrypto.evp_encrypt_final_ex(@encrypt_context, ciphertext.to_unsafe + c_len, pointerof(f_len)) != 1
       raise_ssl_error("evp_encrypt_final")
     end
     ciphertext[0, f_len + c_len]
   end
-
+ 
   def encrypt(str : String)
     encrypt(str.to_slice)
   end
-
+ 
   def decrypt(data : Slice(UInt8))
     p_len = data.size
     len = data.size
     f_len = 0
     plaintext = Slice.new(p_len, 0u8)
-    if LibCrypto.evp_decrypt_init_ex(pointerof(@decrypt_context), nil, nil, nil, nil) != 1
+    if LibCrypto.evp_decrypt_init_ex(@decrypt_context, nil, nil, nil, nil) != 1
       raise_ssl_error("evp_decrypt_init")
     end
-    if LibCrypto.evp_decrypt_update(pointerof(@decrypt_context), plaintext.to_unsafe, pointerof(p_len), data.to_unsafe, len) != 1
+    if LibCrypto.evp_decrypt_update(@decrypt_context, plaintext.to_unsafe, pointerof(p_len), data.to_unsafe, len) != 1
       raise_ssl_error("evp_decrypt_update")
     end
-    if LibCrypto.evp_decrypt_final_ex(pointerof(@decrypt_context), plaintext.to_unsafe + p_len, pointerof(f_len)) != 1
+    if LibCrypto.evp_decrypt_final_ex(@decrypt_context, plaintext.to_unsafe + p_len, pointerof(f_len)) != 1
       raise_ssl_error("evp_decrypt_final")
     end
     plaintext[0, p_len + f_len - nonce_size]
   end
-
+ 
   def decrypt(str : String)
     decrypt(str.as_slice)
   end
-
+ 
   class Error < Exception
     getter call
     getter code
     getter reason
-
+ 
     def initialize(@call : String, @code : UInt64, @reason : String)
       super("OpenSSL returned an error: #{@reason} (function: #{call}, code: #{@code})")
     end
   end
-
+ 
   private def raise_ssl_error(func : String)
     code = LibCrypto.get_error
     reason = LibCrypto.get_error_string(code, nil)
@@ -162,7 +150,7 @@ class AES
     raise instance
   end
 end
-
+ 
 class String
   def as_slice
     bts = bytes
